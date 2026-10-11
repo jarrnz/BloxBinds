@@ -27,8 +27,18 @@ class Tray:
         self.error = None
         self._stopping = threading.Event()
         self.available = False
+        self._status = "Remapping Disabled"
+
+    def set_status(self, status):
+        status = str(status)[:105]
+        if status != self._status:
+            self._status = status
+            if self.hwnd and self.available:
+                self.api.user.PostMessageW(self.hwnd, 0x8002, 0, 0)
 
     def start(self):
+        if self.thread is not None:
+            raise RuntimeError("Tray can only be started once.")
         self.thread = threading.Thread(target=self._run,name="BloxBinds-tray",daemon=True)
         self.thread.start()
         if not self.ready.wait(3):
@@ -77,20 +87,25 @@ class Tray:
                 try:
                     if restart and message == restart:
                         add_icon()
+                    elif message == 0x8002:
+                        data.tip = "BloxBinds — " + self._status
+                        if not shell.Shell_NotifyIconW(1, C.byref(data)):
+                            raise OSError("Tray status update failed.")
                     elif message == 0x8001:
                         if lp in (0x203,0x202):
                             self.events.put(("tray","restore"))
                         elif lp == 0x205:
                             menu = user.CreatePopupMenu()
                             try:
-                                for command,label in ((1,"Restore BloxBinds"),(2,"Disable keybinds" if self.enabled() else "Enable keybinds"),(3,"Exit")):
+                                user.AppendMenuW(menu, 1, 0, self._status)
+                                for command,label in ((1,"Restore BloxBinds"),(2,"Disable keybinds" if self.enabled() else "Enable keybinds"),(4,"Show status indicator"),(3,"Exit")):
                                     user.AppendMenuW(menu,0,command,label)
                                 point = W.POINT()
                                 if user.GetCursorPos(C.byref(point)):
                                     user.SetForegroundWindow(hwnd)
                                     selected = user.TrackPopupMenu(menu,0x100|0x2,point.x,point.y,0,hwnd,None)
-                                    if selected in (1,2,3):
-                                        self.events.put(("tray",{1:"restore",2:"toggle",3:"exit"}[selected]))
+                                    if selected in (1,2,3,4):
+                                        self.events.put(("tray",{1:"restore",2:"toggle",3:"exit",4:"indicator"}[selected]))
                                     user.PostMessageW(hwnd,0,0,0)
                             finally:
                                 if menu:
@@ -115,7 +130,7 @@ class Tray:
             if not self.hwnd:
                 raise OSError("Tray window creation failed.")
             icon = user.LoadIconW(None,C.cast(C.c_void_p(32512),W.LPCWSTR))
-            data = IconData(size=C.sizeof(IconData),hwnd=self.hwnd,uid=1,flags=7,callback=0x8001,icon=icon,tip="BloxBinds — wirru")
+            data = IconData(size=C.sizeof(IconData),hwnd=self.hwnd,uid=1,flags=7,callback=0x8001,icon=icon,tip="BloxBinds — " + self._status)
             add_icon()
             self.ready.set()
             message = W.MSG()

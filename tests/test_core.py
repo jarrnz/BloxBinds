@@ -27,7 +27,7 @@ class BindingTests(unittest.TestCase):
         self.assertEqual(str(parse_binding("Mouse5")), "mouse5")
 
     def test_invalid_and_reserved_keys(self):
-        for value in ("ctrl", "alt+q", "win+q", "ctrl+ctrl+q", "ctrl++q",
+        for value in ("ctrl", "alt+tab", "win+q", "ctrl+ctrl+q", "ctrl++q",
                       "f10", "ctrl+alt+f12", "enter", "escape", "/", "`", "mouse1", "f25"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_binding(value)

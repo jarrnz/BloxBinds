@@ -12,4 +12,5 @@ test-results/
 settings.json
 quickmove.json
 inventory-options.json
+BloxBinds-settings*.json
 *.log

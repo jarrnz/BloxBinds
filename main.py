@@ -10,7 +10,12 @@ def main():
     parser = argparse.ArgumentParser(description="BloxBinds Windows hotbar keybind manager")
     parser.add_argument("--smoke-test", action="store_true", help="Open briefly, verify hooks/layout, then close; never enable remapping")
     parser.add_argument("--allow-no-tray",action="store_true",help="Smoke test only: permit Windows CI without an interactive shell")
+    parser.add_argument("--isolated-smoke-test", action="store_true",
+                        help="Smoke test only: use an independent temporary test instance")
+    parser.add_argument("--startup", action="store_true", help="Launch minimized to tray; remapping starts OFF")
     args = parser.parse_args()
+    if args.isolated_smoke_test and not args.smoke_test:
+        parser.error("--isolated-smoke-test requires --smoke-test")
     if sys.platform != "win32":
         print("BloxBinds requires Windows 10 or 11.", file=sys.stderr)
         return 1
@@ -29,11 +34,16 @@ def main():
         root.report_callback_exception = callback_error
     workspace = tempfile.TemporaryDirectory(prefix="BloxBinds-smoke-") if args.smoke_test else None
     try:
-        app = App(root, path=Path(workspace.name) / "settings.json" if workspace else None)
-        root.deiconify()
+        app = App(root, path=Path(workspace.name) / "settings.json" if workspace else None,
+                  single_instance=not (args.smoke_test and args.isolated_smoke_test))
+        if not args.startup or args.smoke_test or not (app.tray and app.tray.available):
+            root.deiconify()
         if args.smoke_test:
             root.update()
             assert not app.engine.enabled, "Remapping must start OFF"
+            assert not app.quickmove.enabled, "Experimental Quick-Move must start OFF"
+            # Smoke mode cannot enable remapping even if its controls are clicked.
+            app.engine.close()
             assert app.service._thread.is_alive(), "Hook thread exited unexpectedly"
             assert app.service._worker.is_alive(), "Output worker exited unexpectedly"
             if not args.allow_no_tray or app.tray:
@@ -61,7 +71,7 @@ def main():
             app.close()
         if args.smoke_test:
             print(f"Smoke test failed: {error}", file=sys.stderr)
-        else:
+        elif not args.startup:
             messagebox.showerror("BloxBinds could not start", str(error), parent=root)
         try:
             root.destroy()

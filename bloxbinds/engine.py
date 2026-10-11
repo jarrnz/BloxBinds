@@ -19,17 +19,49 @@ class Engine:
         self.lock = RLock()
         self.enabled = False
         self.closed = False
-        self.text_paused = False
+        self.manual_paused = False
+        self.chat_paused = False
+        self.error = None
         self.pause_key = None
         self.generation = 0
         self.held: set[str] = set()
         self.suppressed: set[str] = set()
         self.apply(settings)
 
+    @property
+    def text_paused(self):
+        # Shared safety gate, with independent manual/chat reasons.
+        return self.manual_paused or self.chat_paused
+
+    def status(self, *, focused=False, detected=False, native_text=False, inventory=False):
+        with self.lock:
+            if self.error:
+                return "Error / Recovery Needed"
+            if not self.enabled or self.closed:
+                return "Remapping Disabled"
+            if self.manual_paused:
+                return "Manually Paused"
+            if self.chat_paused:
+                return "Chat Paused"
+            if focused and self.settings.protect_text and native_text:
+                return "Text Entry Paused"
+            if not focused:
+                return "Roblox Not Focused" if detected else "Waiting for Roblox"
+            if inventory:
+                return "Inventory Mode / Experimental"
+            return "Active — Roblox Focused"
+
+    def fail(self, message):
+        with self.lock:
+            self.error = str(message) or "Input handling failed."
+            self.enabled = False
+            self.generation += 1
+
     def apply(self, settings: Settings):
         settings.validate()
         with self.lock:
             self.settings = settings
+            self.error = None
             self.mapping = {binding: slot for slot, binding in
                             enumerate(validate_bindings(settings.bindings), 1) if binding}
             self.enabled = False
@@ -39,6 +71,8 @@ class Engine:
         with self.lock:
             self.enabled = bool(enabled and not self.closed and
                                 self.settings.compatibility != "Unsupported")
+            if self.enabled:
+                self.error = None
             self.generation += 1
             return self.enabled
 
@@ -80,7 +114,11 @@ class Engine:
             if not focused:
                 return Decision()
             if key == "f10":
-                self.text_paused = not self.text_paused
+                if self.text_paused:
+                    # Explicit F10 resume clears both reasons; focus/inventory never do.
+                    self.manual_paused = self.chat_paused = False
+                else:
+                    self.manual_paused = True
                 self.pause_key = None
                 self.generation += 1
                 self.suppressed.add(key)
@@ -91,7 +129,7 @@ class Engine:
                 self.generation += 1
                 return Decision()
             if self.settings.protect_text and key in {"enter", "slash"}:
-                self.text_paused = True
+                self.chat_paused = True
                 self.pause_key = key
                 self.generation += 1
                 return Decision()

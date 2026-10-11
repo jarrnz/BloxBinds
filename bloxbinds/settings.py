@@ -16,6 +16,13 @@ class Settings:
     bindings: tuple[str, ...] = tuple(str(i) for i in range(1, 10))
     compatibility: str = "Unknown"
     protect_text: bool = True
+    automatic_detection: bool = True
+    auto_updates: bool = False
+    launch_with_windows: bool = False
+    indicator: bool = False
+    indicator_topmost: bool = True
+    indicator_position: tuple[int, int] | None = None
+    sound_feedback: bool = False
 
     def validate(self):
         validate_bindings(self.bindings)
@@ -23,12 +30,25 @@ class Settings:
             raise ValueError("Invalid inventory compatibility status.")
         if type(self.protect_text) is not bool:
             raise ValueError("Text protection must be true or false.")
+        if type(self.automatic_detection) is not bool:
+            raise ValueError("Automatic Roblox Detection must be true or false.")
+        for name in ("auto_updates", "launch_with_windows", "indicator", "indicator_topmost", "sound_feedback"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be true or false.")
+        if self.indicator_position is not None and (
+                not isinstance(self.indicator_position, tuple) or len(self.indicator_position) != 2 or
+                any(type(n) is not int or abs(n) > 100000 for n in self.indicator_position)):
+            raise ValueError("Invalid status indicator position.")
         return self
 
     def to_dict(self):
         self.validate()
         return {"version": 1, "bindings": list(self.bindings),
-                "compatibility": self.compatibility, "protect_text": self.protect_text}
+                "compatibility": self.compatibility, "protect_text": self.protect_text,
+                "automatic_detection": self.automatic_detection,
+                **{name: getattr(self, name) for name in ("auto_updates", "launch_with_windows", "indicator",
+                    "indicator_topmost", "sound_feedback")},
+                "indicator_position": list(self.indicator_position) if self.indicator_position else None}
 
     @classmethod
     def from_dict(cls, data):
@@ -38,8 +58,15 @@ class Settings:
         if not isinstance(values, list):
             raise ValueError("Settings must contain a list of bindings.")
         parsed = validate_bindings(values)
+        position = data.get("indicator_position")
+        if position is not None and not isinstance(position, list):
+            raise ValueError("Invalid status indicator position.")
         return cls(tuple(str(b) if b else "" for b in parsed),
-                   data.get("compatibility", "Unknown"), data.get("protect_text", True)).validate()
+                   data.get("compatibility", "Unknown"), data.get("protect_text", True),
+                   data.get("automatic_detection", True),
+                   data.get("auto_updates", False), data.get("launch_with_windows", False),
+                   data.get("indicator", False), data.get("indicator_topmost", True),
+                   tuple(position) if position is not None else None, data.get("sound_feedback", False)).validate()
 
 
 def settings_path() -> Path:

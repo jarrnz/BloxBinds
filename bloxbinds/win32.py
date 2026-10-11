@@ -163,11 +163,12 @@ class WindowsAPI:
         return found
 
     def tap_slot(self, slot: int, modifiers: tuple[int, ...]):
-        """One atomic keyboard batch; held Ctrl/Shift are restored afterwards."""
+        """One tagged batch; temporarily release held modifiers around the digit tap."""
         events = []
 
         def add(vk, up=False, scan=False):
-            flags = (0x0002 if up else 0) | (0x0008 if scan else 0)
+            flags = ((0x0002 if up else 0) | (0x0008 if scan else 0) |
+                     (0x0001 if not scan and vk in {0xA3, 0xA5} else 0))
             events.append(INPUT(type=1, ki=KEYBDINPUT(
                 0 if scan else vk, self.user.MapVirtualKeyW(vk, 0) if scan else 0,
                 flags, 0, INPUT_TAG)))
@@ -184,10 +185,21 @@ class WindowsAPI:
             # Best-effort balancing if Windows accepted only part of the batch.
             cleanup = [INPUT(type=1, ki=KEYBDINPUT(0, self.user.MapVirtualKeyW(48 + slot, 0),
                                                   0x000A, 0, INPUT_TAG))]
-            cleanup.extend(INPUT(type=1, ki=KEYBDINPUT(vk, 0, 0, 0, INPUT_TAG)) for vk in modifiers)
+            cleanup.extend(INPUT(type=1, ki=KEYBDINPUT(vk, 0, 1 if vk in {0xA3, 0xA5} else 0,
+                                                      0, INPUT_TAG)) for vk in modifiers)
             array = (INPUT * len(cleanup))(*cleanup)
             self.user.SendInput(len(array), array, C.sizeof(INPUT))
             raise OSError("Windows rejected simulated input. Remapping has been disabled.")
+
+    def release_modifiers(self, modifiers):
+        """Repair restored keys whose physical release arrived during SendInput."""
+        if not modifiers:
+            return
+        events = [INPUT(type=1, ki=KEYBDINPUT(vk, 0, 2 | (1 if vk in {0xA3, 0xA5} else 0),
+                                            0, INPUT_TAG)) for vk in modifiers]
+        batch = (INPUT * len(events))(*events)
+        if self.user.SendInput(len(batch), batch, C.sizeof(INPUT)) != len(batch):
+            raise OSError("Windows rejected modifier cleanup; remapping disabled.")
 
 
 class SingleInstance:
@@ -239,7 +251,14 @@ class InputService:
             self.stop()
             raise OSError(self._startup_error)
 
+    def healthy(self):
+        return (not self._stop.is_set() and bool(self._thread and self._thread.is_alive())
+                and bool(self._worker and self._worker.is_alive()))
+
     def record(self, active: bool):
+        if active:
+            self.engine.enable(False)
+            self.quickmove.cancel()
         self._recording = active
 
     def mouse_api(self):
@@ -327,32 +346,78 @@ class InputService:
                     self.events.put(("quickmove", str(error)))
         inventory = inventory_at_start
         # In Inventory Mode, unsafe slot actions are consumed without a gameplay fallback.
+        was_paused = self.engine.text_paused
         decision = self.engine.process(key, down, modifiers, focused=focus.roblox,
                                        native_text=focus.text_control, quick_move=inventory or move is not None)
+        if key == "f10" and down and self.engine.settings.sound_feedback and was_paused != self.engine.text_paused:
+            self.events.put(("sound", "paused" if self.engine.text_paused else "resumed"))
         if move and decision.slot is None:
             self.quickmove.complete(move)
         if key == "f12" and down and {"ctrl", "alt"}.issubset(modifiers):
             self._recording = False
             self.events.put(("emergency", None))
         if self._recording and down and focus.pid == os.getpid():
+            from .keys import parse_binding
+            self._recording = False
             if key == "escape":
                 self.events.put(("record", None))
+                if modifiers:
+                    return decision.suppress  # Do not steal Ctrl+Shift+Esc or Alt+Esc.
             else:
                 value = "+".join([m for m in ("ctrl", "shift", "alt", "win") if m in modifiers] + [key])
                 self.events.put(("record", value))
-            self._recording = False
-            # Recording in our own settings window must not type into entries.
+                try:
+                    parse_binding(value)
+                except ValueError:
+                    # Reserved Windows shortcuts remain available during capture.
+                    return decision.suppress
             with self.engine.lock:
                 self.engine.suppressed.add(key)
             return True
+        if self._recording and down and focus.pid != os.getpid():
+            self._recording = False
+            self.events.put(("record", None))
         if decision.slot and (not inventory or move is not None):
             try:
                 self._output.put_nowait((decision.slot, decision.generation, token, move))
             except queue.Full:
                 self.quickmove.cancel()
-                self.engine.enable(False)
-                self.events.put(("error", "Input queue filled; remapping disabled."))
+                self.engine.fail("Input queue filled; remapping disabled.")
+                self.events.put(("error", self.engine.error))
         return decision.suppress
+
+    def _keyboard_event(self, vk, down, *, injected=False):
+        if injected:
+            return False
+        if vk in MODIFIER_VKS:
+            if down:
+                if self.quickmove.busy:
+                    self.quickmove.cancel()
+                self._modifiers.add(vk)
+            else:
+                self._modifiers.discard(vk)
+            return False
+        key = VK_NAMES.get(vk)
+        if key is None and self._recording:
+            key = f"vk{vk:02x}"
+        return self._dispatch(key, down) if key else False
+
+    def _mouse_event(self, message, data=0, *, injected=False):
+        if injected:
+            return False
+        if message in (0x201, 0x202) and self._capture_click(message == 0x201):
+            return True
+        if message in (0x201, 0x204, 0x20A, 0x20E) or (message == 0x200 and self.quickmove.busy):
+            self.quickmove.cancel()
+        if message in (0x207, 0x208):
+            consumed = self._dispatch("mouse3", message == 0x207)
+            if message == 0x207 and not consumed:
+                self.quickmove.cancel()
+            return consumed
+        button = (data >> 16) & 0xFFFF
+        if message in (0x20B, 0x20C) and button in (1, 2):
+            return self._dispatch(f"mouse{button + 3}", message == 0x20B)
+        return False
 
     def _hook_loop(self):
         keyboard_hook = mouse_hook = None
@@ -370,19 +435,12 @@ class InputService:
                     if code >= 0 and wp in (0x100, 0x101, 0x104, 0x105):
                         event = C.cast(lp, C.POINTER(KBDLLHOOKSTRUCT)).contents
                         if not (event.flags & 0x10 or event.dwExtraInfo == INPUT_TAG):
-                            down = wp in (0x100, 0x104)
-                            if event.vkCode in MODIFIER_VKS:
-                                if down:
-                                    if self.quickmove.busy:
-                                        self.quickmove.cancel()
-                                    self._modifiers.add(event.vkCode)
-                                else:
-                                    self._modifiers.discard(event.vkCode)
-                            elif (key := VK_NAMES.get(event.vkCode)) and self._dispatch(key, down):
+                            if self._keyboard_event(event.vkCode, wp in (0x100, 0x104)):
                                 return 1
                 except Exception as error:
-                    self.engine.enable(False)
-                    self.events.put(("error", f"Keyboard hook error: {error}"))
+                    self.engine.fail(f"Keyboard hook error: {error}")
+                    self.quickmove.cancel()
+                    self.events.put(("error", self.engine.error))
                 return self.api.user.CallNextHookEx(None, code, wp, lp)
 
             @HOOKPROC
@@ -391,17 +449,12 @@ class InputService:
                     if code >= 0:
                         event = C.cast(lp, C.POINTER(MSLLHOOKSTRUCT)).contents
                         if not (event.flags & 1 or event.dwExtraInfo == INPUT_TAG):
-                            if wp in (0x201, 0x202) and self._capture_click(wp == 0x201):
+                            if self._mouse_event(wp, event.mouseData):
                                 return 1
-                            if wp in (0x201, 0x204, 0x207, 0x20A, 0x20E) or (wp == 0x200 and self.quickmove.busy):
-                                self.quickmove.cancel()
-                            button = (event.mouseData >> 16) & 0xFFFF
-                            if wp in (0x20B, 0x20C) and button in (1, 2):
-                                if self._dispatch(f"mouse{button + 3}", wp == 0x20B):
-                                    return 1
                 except Exception as error:
-                    self.engine.enable(False)
-                    self.events.put(("error", f"Mouse hook error: {error}"))
+                    self.engine.fail(f"Mouse hook error: {error}")
+                    self.quickmove.cancel()
+                    self.events.put(("error", self.engine.error))
                 return self.api.user.CallNextHookEx(None, code, wp, lp)
 
             # References live for the complete message loop.
@@ -421,8 +474,8 @@ class InputService:
                 self.api.user.DispatchMessageW(C.byref(message))
         except Exception as error:
             self._startup_error = str(error)
-            self.engine.enable(False)
-            self.events.put(("error", f"Input hooks unavailable: {error}"))
+            self.engine.fail(f"Input hooks unavailable: {error}")
+            self.events.put(("error", self.engine.error))
         finally:
             for hook in (keyboard_hook, mouse_hook):
                 if hook:
@@ -457,17 +510,25 @@ class InputService:
                     continue
                 # Never hold the engine lock over SendInput: Windows can call
                 # hooks synchronously while input is inserted into the queue.
-                modifiers = tuple(vk for vk in (0xA0, 0xA1, 0xA2, 0xA3)
+                modifiers = tuple(vk for vk in (0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5)
                                   if self.api.user.GetAsyncKeyState(vk) & 0x8000)
-                if any(self.api.user.GetAsyncKeyState(vk) & 0x8000 for vk in (0x12, 0x5B, 0x5C)):
+                if any(self.api.user.GetAsyncKeyState(vk) & 0x8000 for vk in (0x5B, 0x5C)):
                     continue
                 focus = self.api.focus()
                 if token != (focus.hwnd, focus.pid) or not self.engine.allowed(
                         generation, focus.roblox, focus.text_control):
                     continue
-                self.api.tap_slot(slot, modifiers)
+                try:
+                    self.api.tap_slot(slot, modifiers)
+                finally:
+                    physical = self._modifiers.copy()
+                    generic = {0xA0:0x10, 0xA1:0x10, 0xA2:0x11, 0xA3:0x11, 0xA4:0x12, 0xA5:0x12}
+                    abandoned = tuple(vk for vk in modifiers if vk not in physical and generic[vk] not in physical)
+                    if abandoned:
+                        self.api.release_modifiers(abandoned)
             except Exception as error:
-                self.engine.enable(False)
+                self.engine.fail(str(error))
+                self.quickmove.cancel()
                 self.events.put(("error", str(error)))
 
     def stop(self):
@@ -479,10 +540,18 @@ class InputService:
             self._output.put_nowait(None)
         except queue.Full:
             pass
+        failures = []
+        # Keep hooks pumping until output finishes: SendInput can invoke them
+        # synchronously, and physical modifier releases must still be tracked.
+        if self._worker and self._worker is not threading.current_thread():
+            self._worker.join(timeout=3)
+            if self._worker.is_alive():
+                failures.append(self._worker.name)
         if self._thread_id:
             self.api.user.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
-        for thread in (self._thread, self._worker):
-            if thread and thread is not threading.current_thread():
-                thread.join(timeout=3)
-                if thread.is_alive():
-                    raise RuntimeError(f"{thread.name} did not shut down cleanly.")
+        if self._thread and self._thread is not threading.current_thread():
+            self._thread.join(timeout=3)
+            if self._thread.is_alive():
+                failures.append(self._thread.name)
+        if failures:
+            raise RuntimeError(f"{', '.join(failures)} did not shut down cleanly.")

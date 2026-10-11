@@ -1,6 +1,7 @@
 import ctypes as C
 import sys
 import os
+import hashlib
 import unittest
 from ctypes import wintypes as W
 
@@ -14,7 +15,15 @@ class ScreenTests(unittest.TestCase):
         root.configure(background="#2468ac");root.attributes("-topmost",True)
         try:
             root.update()
+            # Tk update does not wait for desktop composition/window fade-in.
+            # Settle only this test window; keep all twelve strict equality checks.
+            root.after(300, root.quit)
+            root.mainloop()
+            root.update()
             api=WindowsAPI();mouse=MouseAPI(api)
+            dwm=C.WinDLL("dwmapi")
+            api._declare(dwm,"DwmFlush",[],C.c_long)
+            self.assertEqual(dwm.DwmFlush(),0,"Desktop composition did not flush")
             hwnd=api.user.GetAncestor(root.winfo_id(),2)
             with mouse.physical_coordinates():
                 origin=W.POINT()
@@ -29,6 +38,8 @@ class ScreenTests(unittest.TestCase):
                 after=api.user.GetGuiResources(kernel.GetCurrentProcess(),0)
             self.assertEqual(len(samples[0]),64)
             self.assertEqual(len(set(samples)),1)
+            expected=hashlib.sha256(bytes((0xac,0x68,0x24))*(48*48)).hexdigest()
+            self.assertEqual(samples[0],expected,"Sample did not contain the known solid test window")
             self.assertLessEqual(after,before+1)
         finally:
             root.destroy()

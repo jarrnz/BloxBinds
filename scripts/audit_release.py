@@ -11,7 +11,7 @@ import types
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-ROOT_FILES={"README.md","LICENSE","TEST_RESULTS.md","PRIVACY_AUDIT.md","requirements.txt",
+ROOT_FILES={"README.md","LICENSE","TEST_RESULTS.md","PRIVACY_AUDIT.md","RELEASE_NOTES.md","requirements.txt",
             "requirements-build.txt",".gitignore","main.py"}
 PUBLIC_DIRS={"bloxbinds","tests","scripts",".github","third_party"}
 SUFFIXES={".py",".txt",".md",".yml",".yaml",".terms"}

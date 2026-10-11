@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 from bloxbinds.engine import Engine
 from bloxbinds.settings import Settings
-from bloxbinds.win32 import CLIENT_NAMES, Focus, INPUT, InputService, WindowsAPI
+from bloxbinds.win32 import CLIENT_NAMES, Focus, INPUT, InputService, SingleInstance, WindowsAPI
 
 
 def settings():
@@ -77,6 +77,19 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(self.service._worker.is_alive())
         self.api.user.PostThreadMessageW.assert_called_with(77, 0x12, 0, 0)
 
+    def test_shutdown_drains_worker_before_stopping_hooks(self):
+        order = []
+        self.service._worker = Mock()
+        self.service._thread = Mock()
+        self.service._worker.is_alive.return_value = False
+        self.service._thread.is_alive.return_value = False
+        self.service._worker.join.side_effect = lambda **kw: order.append("worker")
+        self.service._thread.join.side_effect = lambda **kw: order.append("hooks")
+        self.service._thread_id = 77
+        self.api.user.PostThreadMessageW.side_effect = lambda *args: order.append("quit")
+        self.service.stop()
+        self.assertEqual(order, ["worker", "quit", "hooks"])
+
     def test_shutdown_failure_is_reported(self):
         thread = Mock()
         thread.name = "blocked-thread"
@@ -88,6 +101,16 @@ class ServiceTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows API tests")
 class NativeTests(unittest.TestCase):
+    def test_single_instance_rejects_existing_mutex_and_releases_handle(self):
+        api = Mock()
+        def create(*args):
+            ctypes.set_last_error(183)
+            return 99
+        api.kernel.CreateMutexW.side_effect = create
+        with self.assertRaisesRegex(OSError, "already running"):
+            SingleInstance(api)
+        api.kernel.CloseHandle.assert_called_once_with(99)
+
     def test_input_abi(self):
         self.assertEqual(ctypes.sizeof(INPUT), 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
 
