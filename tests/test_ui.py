@@ -99,6 +99,22 @@ class UITests(unittest.TestCase):
         self.app.tray=Mock();self.app.tray.stop.side_effect=RuntimeError("failed")
         with self.assertRaises(RuntimeError):self.app.close()
         self.service.stop.assert_called_once();self.assertTrue(self.app._closed)
+    def test_inventory_button_preserves_manual_pause_after_backquote(self):
+        from bloxbinds.win32 import Focus
+        self.app.engine.enable(True)
+        self.app.engine.process("f10", True, focused=True)
+        self.app.engine.process("f10", False)
+        self.app.engine.process("backquote", True, focused=True)
+        self.app.engine.process("backquote", False)
+        self.app.api.focus.return_value = Focus(12, 34, True, False)
+        self.app._mode_pending = True
+        with patch.object(self.app.quickmove, "activate") as activate:
+            self.app._poll()
+        activate.assert_not_called()
+        self.service.mouse_api.assert_not_called()
+        self.assertTrue(self.app.engine.text_paused)
+        self.assertFalse(self.app.quickmove.active)
+
     def test_inventory_unsupported_leaves_hotbar_available(self):
         self.app.quickmove.set_compatibility("Unsupported");self.app.toggle_enabled()
         self.assertTrue(self.app.engine.enabled);self.assertFalse(self.app.quickmove.active)

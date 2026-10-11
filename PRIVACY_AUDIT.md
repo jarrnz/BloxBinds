@@ -1,10 +1,10 @@
 # Public release privacy audit
 
-BloxBinds 1.2.0 public developer identity: **wirru**.
+BloxBinds 1.2.1 public developer identity: **wirru**.
 
 Scope: the allowlisted source bundle, release ZIP members, Windows version metadata, unpacked PyInstaller code and data, and inspectable Git identity/history. The final automated scan is required before packaging; results are recorded in TEST_RESULTS.md.
 
-The repository had no commits when inspected, so no identifying Git history required rewriting. An inherited personal author name/email was found in local Git configuration. This project's local author name is now wirru, its email is deliberately empty, and user.useConfigOnly is enabled. A local pre-commit hook checks both author and committer identity and blocks commits until the owner supplies their **actual GitHub-provided noreply email**. The hook lives only in this working repository, not in release bundles; new clones must configure their own Git identity. None was invented. Global Git configuration and other repositories were not changed.
+This patch preserves the configured public Git author **wirru** and the existing GitHub noreply email. No email address was invented, Git configuration changed, history rewritten, or commit/tag/push/publication performed for this update. Release bundles omit Git metadata. New clones must configure their own public commit identity.
 
 Public bundles omit .git, local settings/calibration, virtual environments, build diagnostics, test caches, previous executables/archives and backups. Local development/build directories can contain machine-specific paths; never publish them. The executable's own version strings use wirru and relative Python code filenames are checked. PE/archive timestamps use a neutral fixed date.
 

@@ -2,7 +2,7 @@
 
 A free, lightweight Windows 11 hotbar keybind manager for the official Roblox desktop client. Developed by **wirru**, under the MIT License. Runs alongside Roblox; no Studio or development tools required.
 
-**1.2.0:** Preserves the existing hotbar system and adds experimental manual Inventory Mode, saved calibration, conservative empty-target checks, and native Windows tray controls. Hotbar remapping was previously manually tested by the project owner. **Quick-Move has not been verified in the actual Roblox client.** It is not universally compatible.
+**1.2.1:** Fixes the sticky pause after opening/closing the backpack with backquote. Backquote passes through and never changes a deliberate F10 or chat pause; Inventory Mode cannot clear those pauses. Existing hotbar bindings, calibration and tray controls are preserved. Hotbar remapping was previously manually tested by the project owner. **Quick-Move has not been verified in the actual Roblox client.** It is not universally compatible.
 
 ## Install
 
@@ -15,7 +15,7 @@ Download the Windows x64 ZIP, extract it, and run `BloxBinds.exe`. Python and ad
 3. Click **Save & apply**, then enable remapping. Duplicate bindings are rejected. Settings are saved under `%LOCALAPPDATA%\BloxBinds`.
 4. Roblox must be focused. Focus loss suspends normal remapping; it resumes when Roblox returns to focus.
 
-**Emergency stop:** Ctrl+Alt+F12 disables remapping globally. **F10** pauses/resumes in Roblox. Enter, `/`, and the backpack backquote key pause until F10 or an explicit Inventory Mode activation for the backpack pause. Native Windows text controls also pause remapping when text protection is enabled. Roblox custom text widgets are not reliably detectable: pause before clicking chat, search, or other text fields.
+**Emergency stop:** Ctrl+Alt+F12 disables remapping globally. **F10** pauses/resumes in Roblox. Enter and `/` pause until F10. Backquote opens/closes the backpack normally and cancels Inventory Mode without creating or clearing a pause. Ordinary hotbar remapping stays available whenever Roblox is focused, no F10/chat pause is active, and no protected text control is detected; closing the backpack needs no F10. BloxBinds does not infer whether the backpack is open. Inventory Mode cannot override a deliberate F10 or chat pause. Native Windows text controls also pause remapping when text protection is enabled. Roblox custom text widgets are not reliably detectable: pause before clicking chat, search, or other text fields.
 
 The main window's hotbar compatibility setting is separate from Quick-Move compatibility. Setting *hotbar* compatibility to Unsupported disables hotbar remapping. Leaving Quick-Move compatibility Unknown or Unsupported does not disable ordinary hotbar bindings.
 

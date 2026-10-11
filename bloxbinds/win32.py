@@ -265,14 +265,12 @@ class InputService:
             if self.quickmove.active:
                 self.quickmove.cancel()
             else:
-                if not self.engine.enabled or focus.text_control or (self.engine.text_paused and self.engine.pause_key != "backquote"):
+                if not self.engine.enabled or focus.text_control or self.engine.text_paused:
                     raise ValueError("Resume remapping and close all text entry before Inventory Mode.")
                 geometry, _ = self.mouse_api().snapshot(focus)
                 self.quickmove.activate(geometry)
-                # The explicit mode toggle asserts the backpack is open, not that chat is closed automatically.
+                # Inventory Mode never clears a chat or deliberate F10 pause.
                 with self.engine.lock:
-                    self.engine.text_paused = False
-                    self.engine.pause_key = None
                     self.engine.generation += 1
             self.events.put(("quickmove", self.quickmove.status()))
         except (OSError, ValueError) as error:

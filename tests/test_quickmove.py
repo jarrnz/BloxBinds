@@ -117,9 +117,84 @@ class IntegrationTests(unittest.TestCase):
     def test_gameplay_hotbar_preserved(self):
         self.engine.apply(Settings(("q","2","3","4","5","6","7","8","9")));self.engine.enable(True)
         self.service._dispatch("q",True);self.drain();self.api.tap_slot.assert_called_once_with(1,());self.mouse.drag.assert_not_called()
-    def test_backpack_pause_overridden_but_chat_pause_refused(self):
-        self.service._dispatch("backquote",True);self.service._dispatch("backquote",False);self.mode();self.assertTrue(self.quick.active)
+    def test_backquote_does_not_pause_but_chat_blocks_inventory_mode(self):
+        self.service._dispatch("backquote",True);self.service._dispatch("backquote",False);self.assertFalse(self.engine.text_paused);self.mode();self.assertTrue(self.quick.active)
         self.service._dispatch("enter",True);self.service._dispatch("enter",False);self.mode();self.assertFalse(self.quick.active);self.assertTrue(self.engine.text_paused)
+    def test_manual_pause_cannot_be_overridden_by_inventory_shortcut(self):
+        self.service._dispatch("f10", True)
+        self.service._dispatch("f10", False)
+        for _ in range(2):
+            self.assertFalse(self.service._dispatch("backquote", True))
+            self.assertFalse(self.service._dispatch("backquote", False))
+        self.mode()
+        self.assertFalse(self.quick.active)
+        self.assertTrue(self.engine.text_paused)
+        self.mouse.snapshot.assert_not_called()
+        self.service._dispatch("f10", True)
+        self.service._dispatch("f10", False)
+        self.mode()
+        self.assertTrue(self.quick.active)
+
+    def test_backquote_cancels_inventory_and_stale_drag_then_hotbar_works(self):
+        attempts = []
+        def drag(move, allowed):
+            attempts.append(allowed())
+            return attempts[-1]
+        self.mouse.drag.side_effect = drag
+        self.engine.apply(Settings(("q", "2", "3", "4", "5", "6", "7", "8", "9")))
+        self.engine.enable(True)
+        self.mode()
+        self.service._dispatch("q", True)
+        self.service._dispatch("q", False)
+        for _ in range(2):
+            self.assertFalse(self.service._dispatch("backquote", True))
+            self.assertFalse(self.service._dispatch("backquote", False))
+        self.assertFalse(self.quick.active)
+        self.assertFalse(self.engine.text_paused)
+        self.service._dispatch("q", True)
+        self.drain()
+        self.assertEqual(attempts, [False])  # The drag guard refused the stale job.
+        self.api.tap_slot.assert_called_once_with(1, ())
+
+    def test_focus_return_preserves_manual_pause_without_rearming_inventory(self):
+        for paused in (False, True):
+            with self.subTest(paused=paused):
+                self.setUp()
+                self.engine.apply(Settings(("q", "2", "3", "4", "5", "6", "7", "8", "9")))
+                self.engine.enable(True)
+                self.mode()
+                if paused:
+                    self.service._dispatch("f10", True)
+                    self.service._dispatch("f10", False)
+                self.service._dispatch("backquote", True)
+                self.service._dispatch("backquote", False)
+                self.api.focus.return_value = Focus(56, 78, False, False)
+                self.service._dispatch("q", True)
+                self.service._dispatch("q", False)
+                self.api.focus.return_value = Focus(12, 34, True, False)
+                self.service._dispatch("q", True)
+                self.drain()
+                self.assertFalse(self.quick.active)
+                self.assertEqual(self.engine.text_paused, paused)
+                self.mouse.drag.assert_not_called()
+                if paused:
+                    self.api.tap_slot.assert_not_called()
+                else:
+                    self.api.tap_slot.assert_called_once_with(1, ())
+
+    def test_inventory_activation_does_not_clear_pause_arriving_during_snapshot(self):
+        def snapshot(focus):
+            self.engine.process("f10", True, focused=True)
+            self.engine.process("f10", False)
+            return geometry(), (200, 200)
+        self.mouse.snapshot.side_effect = snapshot
+        self.mode()
+        self.assertTrue(self.engine.text_paused)
+        self.service._dispatch("1", True)
+        self.drain()
+        self.mouse.drag.assert_not_called()
+        self.api.tap_slot.assert_not_called()
+
     def test_native_text_refused(self):
         self.api.focus.return_value=Focus(12,34,True,True);self.mode();self.assertFalse(self.quick.active)
     def test_repeat_does_not_duplicate_job(self):

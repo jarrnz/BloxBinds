@@ -130,7 +130,7 @@ class App:
         ttk.Label(body, text=("Help: Record a key, Ctrl/Shift combination, or Mouse4/Mouse5.\n"
                               "Leave a binding blank to keep that slot unbound.\n"
                               "Ctrl+Alt+F12 disables globally. F10 pauses/resumes in Roblox.\n"
-                              "Enter, / and ` pause until F10. Pause before clicking any text field.\n"
+                              "Enter and / pause until F10. Pause before clicking any text field.\n"
                               "Quick-move: experimental manual mode; use Quick-move… above.\n"
                               "Unknown allows testing; Verified by me is your current-game check.\n"
                               "Custom inventories and simulated input may be incompatible."),
@@ -386,13 +386,12 @@ class App:
             if self._mode_pending and focus.roblox:
                 self._mode_pending = False
                 try:
-                    if focus.text_control or (self.engine.text_paused and self.engine.pause_key != "backquote") or not self.engine.enabled:
+                    if focus.text_control or self.engine.text_paused or not self.engine.enabled:
                         raise ValueError("Close text entry and resume remapping before arming Inventory Mode.")
                     geometry,_ = self.service.mouse_api().snapshot(focus)
                     self.quickmove.activate(geometry)
-                    self.engine.text_paused = False
-                    self.engine.pause_key = None
-                    self.engine.generation += 1
+                    with self.engine.lock:
+                        self.engine.generation += 1
                 except (OSError,ValueError) as error:
                     self.quickmove.cancel()
                     self.notice.set(str(error))
@@ -413,7 +412,7 @@ class App:
             elif not focus.roblox:
                 state = "Waiting for Roblox focus"
             elif self.engine.text_paused:
-                state = "Paused for text/inventory — press F10 in Roblox to resume"
+                state = "Paused — press F10 in Roblox to resume"
             elif self.engine.settings.protect_text and focus.text_control:
                 state = "Paused: Windows text control focused"
             elif self.quickmove.enabled:

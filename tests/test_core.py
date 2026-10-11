@@ -109,7 +109,7 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(self.engine.process("q", False).suppress)
 
     def test_chat_keys_pause_until_manual_resume(self):
-        for key in ("enter", "slash", "backquote"):
+        for key in ("enter", "slash"):
             with self.subTest(key=key):
                 self.engine = Engine(configured())
                 self.engine.enable(True)
@@ -120,6 +120,74 @@ class EngineTests(unittest.TestCase):
                 self.assertTrue(self.press("f10").suppress)
                 self.assertFalse(self.engine.text_paused)
                 self.assertEqual(self.press("q").slot, 1)
+
+    def test_backquote_passes_through_without_sticky_pause(self):
+        for _ in range(2):
+            generation = self.engine.generation
+            self.assertFalse(self.press("backquote").suppress)
+            self.assertFalse(self.press("backquote").suppress)  # Key repeat.
+            self.assertEqual(self.engine.generation, generation + 1)
+            self.assertFalse(self.engine.allowed(generation, True))
+            self.assertFalse(self.engine.process("backquote", False).suppress)
+            self.assertFalse(self.engine.text_paused)
+            self.assertEqual(self.press("q").slot, 1)
+            self.engine.process("q", False)
+
+    def test_manual_pause_survives_backquote_until_f10(self):
+        self.press("f10")
+        self.engine.process("f10", False)
+        for _ in range(2):
+            self.press("backquote")
+            self.engine.process("backquote", False)
+            self.assertTrue(self.engine.text_paused)
+            self.assertIsNone(self.engine.pause_key)
+            self.assertIsNone(self.press("q").slot)
+            self.engine.process("q", False)
+        self.press("f10")
+        self.assertFalse(self.engine.text_paused)
+        self.assertEqual(self.press("q").slot, 1)
+
+    def test_chat_pause_survives_backquote(self):
+        for key in ("enter", "slash"):
+            with self.subTest(key=key):
+                self.engine = Engine(configured())
+                self.engine.enable(True)
+                self.press(key)
+                self.engine.process(key, False)
+                for _ in range(2):
+                    self.press("backquote")
+                    self.engine.process("backquote", False)
+                self.assertTrue(self.engine.text_paused)
+                self.assertEqual(self.engine.pause_key, key)
+                self.assertIsNone(self.press("q").slot)
+
+    def test_backquote_preserves_detected_text_protection(self):
+        self.press("backquote", native_text=True)
+        self.engine.process("backquote", False)
+        self.assertIsNone(self.press("q", native_text=True).slot)
+        self.engine.process("q", False)
+        self.assertFalse(self.engine.text_paused)
+        self.assertEqual(self.press("q", native_text=False).slot, 1)
+
+    def test_backquote_and_focus_changes_preserve_pause_choice(self):
+        for paused in (False, True):
+            with self.subTest(paused=paused):
+                self.engine = Engine(configured())
+                self.engine.enable(True)
+                if paused:
+                    self.press("f10")
+                    self.engine.process("f10", False)
+                self.press("backquote")
+                self.engine.process("backquote", False)
+                self.engine.focus_lost()
+                self.assertIsNone(self.engine.process("q", True, focused=False).slot)
+                self.engine.process("q", False)
+                generation = self.engine.generation
+                self.engine.process("backquote", True, focused=False)
+                self.engine.process("backquote", False)
+                self.assertEqual(self.engine.generation, generation)
+                self.assertEqual(self.engine.text_paused, paused)
+                self.assertEqual(self.press("q").slot, None if paused else 1)
 
     def test_native_text_controls_and_optional_heuristic(self):
         self.assertFalse(self.press("q", native_text=True).suppress)

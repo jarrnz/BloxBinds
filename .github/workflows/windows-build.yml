@@ -39,7 +39,7 @@ jobs:
         with:
           name: BloxBinds-Windows-x64
           path: |
-            dist/BloxBinds-1.2.0-Windows-x64.zip
-            dist/BloxBinds-1.2.0-source.zip
+            dist/BloxBinds-1.2.1-Windows-x64.zip
+            dist/BloxBinds-1.2.1-source.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error

@@ -85,7 +85,12 @@ class Engine:
                 self.generation += 1
                 self.suppressed.add(key)
                 return Decision(True)
-            if self.settings.protect_text and key in {"enter", "slash", "backquote"}:
+            if key == "backquote":
+                # Pass the backpack key through; its actual open/closed state is unknown.
+                # Cancel queued output without changing chat or deliberate F10 pauses.
+                self.generation += 1
+                return Decision()
+            if self.settings.protect_text and key in {"enter", "slash"}:
                 self.text_paused = True
                 self.pause_key = key
                 self.generation += 1
