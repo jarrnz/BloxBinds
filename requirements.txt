@@ -1,0 +1,2 @@
+# Runtime uses only Python's standard library (Tkinter and ctypes).
+# Official Windows Python installers include Tkinter. No pip packages are needed.

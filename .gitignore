@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+test-results/
+.pytest_cache/
+.ruff_cache/
+*.tmp
+
+settings.json
+quickmove.json
+inventory-options.json
+*.log

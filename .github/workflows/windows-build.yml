@@ -1,0 +1,45 @@
+name: Windows executable
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - name: Test
+        run: python -m unittest discover -s tests -v
+      - name: Install build tooling
+        run: python -m pip install -r requirements-build.txt
+      - name: Build
+        run: python scripts/build.py
+      - name: Executable smoke test
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath .\dist\BloxBinds.exe -ArgumentList '--smoke-test','--allow-no-tray' -WindowStyle Hidden -PassThru
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Executable smoke test timed out' }
+          if ($process.ExitCode -ne 0) { throw "Executable smoke test failed: $($process.ExitCode)" }
+      - name: Audit public source and executable
+        run: python scripts/audit_release.py --exe dist/BloxBinds.exe
+      - name: Package release files
+        run: python scripts/package_release.py
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: BloxBinds-Windows-x64
+          path: |
+            dist/BloxBinds-1.2.0-Windows-x64.zip
+            dist/BloxBinds-1.2.0-source.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
